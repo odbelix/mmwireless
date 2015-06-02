@@ -1,0 +1,544 @@
+#!/usr/bin/env python
+########################################################################
+# <mmwireless, Get information from WLC>
+# Copyright (C) 2015  Manuel Moscoso Dominguez manuel.moscoso.d@gmail.com
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+########################################################################
+# Manuel Moscoso Dominguez <manuel.moscoso.d@gmail.com>
+########################################################################
+import syslog
+import sys, os
+import time
+import commands
+from rrdtool import update as rrd_update 
+import datetime
+from pymongo import MongoClient
+import ConfigParser
+from time import gmtime, strftime
+########################################################################
+
+
+path_config = "/home/mmoscoso/Documentos/workspace/mmwireless/etc/"
+########################################################################
+# WLC and SNMP OID declaration
+list_wlc = {'wlc_clients_talca':'192.168.20.135','wlc_clients_curico' : '172.17.1.250','wlc_clients_santaelena' : '172.18.1.250', 'wlc_clients_quebec' : '10.1.1.120'}
+list_oid_ap = {'AP_NAMES': 'iso.3.6.1.4.1.14179.2.2.1.1.3','AP_MACAP' : 'iso.3.6.1.4.1.14179.2.2.1.1.1' , 'AP_MACETH' : 'iso.3.6.1.4.1.14179.2.2.1.1.33' , 'AP_COUNT': 'iso.3.6.1.4.1.9.9.618.1.8.4', 'AP_IP' : 'iso.3.6.1.4.1.14179.2.2.1.1.19' }
+list_oid_client = {'CLIENT_MAC': 'iso.3.6.1.4.1.14179.2.1.4.1.1' , 'CLIENT_IP': 'iso.3.6.1.4.1.14179.2.1.4.1.2', 'CLIENT_MACAP' : 'iso.3.6.1.4.1.14179.2.1.4.1.4' }
+list_oid_rogue_ap = { 'AP_ROGUE_NAMES' : 'iso.3.6.1.4.1.14179.2.1.7.1.11' , 'AP_ROGUE_MAC_AP_DET' : 'iso.3.6.1.4.1.14179.2.1.7.1.13', 'AP_ROGUE_LASTREPORT': 'iso.3.6.1.4.1.14179.2.1.7.1.4' }
+########################################################################
+# PATH and OTHERS stuff
+path_bin = ""
+path_rrddb = ""
+path_snmp_logs = ""
+log_name = ""
+########################################################################
+# Collections 
+wlcclientCollection = 'Wlcclients'
+logCollection = 'Log'
+apSummaryCollection = 'Apsummary'
+summaryCollection = 'Summary'
+clientsCollection = 'Clients'
+clientsLastCollection = 'Clientslast'
+apCollection = 'Ap'
+rogueapCollection = 'Rogueap'
+########################################################################
+# Time Start/End Measure 
+startSummary = datetime.datetime.now()
+startMeasure = datetime.datetime.now()
+endMeasure = datetime.datetime.now()
+########################################################################
+# Output Variables for SNMP queries results
+output_snmp_rogueap_names = ""
+output_snmp_rogueap_macdet = ""
+output_snmp_rogueap_lastreport = ""
+output_snmp_clients_ip = ""
+output_snmp_clients_mac = ""
+output_snmp_clients_macap = ""
+output_snmp_ap_names = ""
+output_snmp_ap_macap = ""
+output_snmp_ap_macet = ""
+output_snmp_ap_ip = ""
+########################################################################
+# Arrays
+logs = []
+clientsCount = []
+apCount = []
+clientsLast = []
+########################################################################
+# Log actions
+logActionStartMeasuring = 'Start measuring'
+logActionStopMeasuring = 'Stop measuring'
+logActionStartClients = 'Start proccessing clients measures'
+logActionStopClients = 'Stop proccessing clients measures'
+logActionStartRogue = 'Start proccessing RogueAP measures'
+logActionStopRogue = 'Stop proccessing RogueAP measures'
+logActionStartAp = 'Start proccessing AP measures'
+logActionStopAp = 'Stop proccessing AP measures'
+########################################################################
+# MongoDB parameters
+ipMongoDB = ''
+nameDBMongo = ''
+userMongoDB = ''
+passwordMongoDB = ''
+portMongoDB = ''
+mongoDBConnection = ''
+########################################################################
+def clearingAllList():
+	global clientsCount,apCount,logs,clientsLast
+	clientsCount = []
+	apCount = []
+	logs = []
+	clientsLast = []
+
+def setDatetimeMeasure():
+	global startSummary,startMeasure,endMeasure
+	startSummary = datetime.datetime.now()
+	startMeasure = datetime.datetime.now()
+	endMeasure = datetime.datetime.now()
+	
+	
+def creatingSNMPLogFile(NAMEOUTPUT,OUTPUT,WLCIP):
+	global log_name,path_snmp_logs,startSummary
+	syslog.syslog(syslog.LOG_INFO,"(" + WLCIP + ") Adding content of %s to log_snmp" % (NAMEOUTPUT) )
+	message = "#####################################################\n"
+	message = message + "(" + WLCIP + "):" + NAMEOUTPUT + "\n"
+	message = message + OUTPUT[1]
+	message = message + "\n#####################################################\n"
+	file_path = path_snmp_logs + "/" + log_name + startSummary.strftime("%Y%m%d_%H%M")
+	file_object = open(file_path,"a")
+	file_object.write(message)
+	syslog.syslog(syslog.LOG_INFO,"(" + WLCIP + ") Finish-Adding content of %s to log_snmp" % (NAMEOUTPUT) )
+##
+def addingLog(DATETIME,ACTION,WLCIP):
+	global logs
+	syslog.syslog(syslog.LOG_INFO,"(" + WLCIP + ") " +ACTION + " (" + DATETIME.strftime("%Y-%m-%d %H:%M:%S") + ")")
+	log = {}
+	log['date_of_record'] = datetime.datetime.now()
+	log['date_of_execute'] = DATETIME
+	log['log_action'] = ACTION + ' : ' + WLCIP
+	log['wlc_ip'] = WLCIP
+	logs.append(log)
+
+##
+def savingLogs():
+	global logs,logCollection
+	insertDataOnMongoDB(logCollection,logs,"LOGs")
+
+def updateRRDFile(wlc,nClients):
+	global path_rrddb
+	value = 'N:%d' % (nClients)
+	ret = rrd_update( path_rrddb +'/%s.rrd' %(wlc),value);
+	if ret:
+		print rrdtool.error()
+	
+##
+def logOutputLen(WLCIP):
+	global output_snmp_rogueap_names,output_snmp_rogueap_macdet
+	global output_snmp_rogueap_lastreport
+	global output_snmp_clients_ip,output_snmp_clients_mac,output_snmp_clients_macap
+	global output_snmp_ap_names,output_snmp_ap_macap,output_snmp_ap_macet,output_snmp_ap_ip
+	
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_rogueap_names LEN(%d)" % (WLCIP,len(output_snmp_rogueap_names[1])))
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_rogueap_macdet LEN(%d)" % (WLCIP,len(output_snmp_rogueap_macdet[1])))
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_rogueap_lastreport LEN(%d)" % (WLCIP,len(output_snmp_rogueap_lastreport[1])))
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_clients_ip LEN(%d)" % (WLCIP,len(output_snmp_clients_ip[1])))
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_clients_mac LEN(%d)" % (WLCIP,len(output_snmp_clients_mac[1])))
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_clients_macap LEN(%d)" % (WLCIP,len(output_snmp_clients_macap[1])))
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_ap_names LEN(%d)" % (WLCIP,len(output_snmp_ap_names[1])))
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_ap_macap LEN(%d)" % (WLCIP,len(output_snmp_ap_macap[1])))
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_ap_macet LEN(%d)" % (WLCIP,len(output_snmp_ap_macet[1])))
+	syslog.syslog(syslog.LOG_INFO,"(%s) output_snmp_ap_ip LEN(%d)" % (WLCIP,len(output_snmp_ap_ip[1])))
+	
+	
+##
+def getInformationBySNMP(wlcIP):
+	global path_bin
+	global startMeasure,endMeasure
+	global output_snmp_rogueap_names,output_snmp_rogueap_macdet
+	global output_snmp_rogueap_lastreport
+	global output_snmp_clients_ip,output_snmp_clients_mac,output_snmp_clients_macap
+	global output_snmp_ap_names,output_snmp_ap_macap,output_snmp_ap_macet,output_snmp_ap_ip
+	global logCollection,logActionStartMeasuring,logActionStopMeasuring
+	global logs
+	
+	startMeasure = datetime.datetime.now()
+	## LOG
+	addingLog(startMeasure,logActionStartMeasuring,wlcIP)
+
+	# MEASURING
+	output_snmp_clients_ip = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_client["CLIENT_IP"],""))
+	creatingSNMPLogFile("output_snmp_clients_ip",output_snmp_clients_ip,wlcIP)
+	
+	output_snmp_clients_mac = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_client["CLIENT_MAC"],""))
+	creatingSNMPLogFile("output_snmp_clients_mac",output_snmp_clients_mac,wlcIP)
+	
+	output_snmp_clients_macap = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_client["CLIENT_MACAP"],""))
+	creatingSNMPLogFile("output_snmp_clients_macap",output_snmp_clients_macap,wlcIP)
+	
+	output_snmp_rogueap_names = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_rogue_ap["AP_ROGUE_NAMES"],""))
+	creatingSNMPLogFile("output_snmp_rogueap_names",output_snmp_rogueap_names,wlcIP)
+	
+	output_snmp_rogueap_macdet = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_rogue_ap["AP_ROGUE_MAC_AP_DET"],""))
+	creatingSNMPLogFile("output_snmp_rogueap_macdet",output_snmp_rogueap_macdet,wlcIP)
+	
+	output_snmp_rogueap_lastreport = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_rogue_ap["AP_ROGUE_LASTREPORT"],""))
+	creatingSNMPLogFile("output_snmp_rogueap_lastreport",output_snmp_rogueap_lastreport,wlcIP)
+	
+	## AP	
+	output_snmp_ap_names = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_ap["AP_NAMES"],""))
+	creatingSNMPLogFile("output_snmp_ap",output_snmp_ap_names,wlcIP)
+	
+	output_snmp_ap_macap = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_ap["AP_MACAP"],""))
+	creatingSNMPLogFile("output_snmp_ap_macap",output_snmp_ap_macap,wlcIP)
+	
+	output_snmp_ap_macet = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_ap["AP_MACETH"],""))
+	creatingSNMPLogFile("output_snmp_ap_macet",output_snmp_ap_macet,wlcIP)
+	
+	output_snmp_ap_ip = commands.getstatusoutput(path_bin + ' %s %s %s' % (wlcIP,list_oid_ap["AP_IP"],""))
+	creatingSNMPLogFile("output_snmp_ap_ip",output_snmp_ap_ip,wlcIP)
+	
+	
+	## END AP
+	
+	endMeasure = datetime.datetime.now()
+	## LOG
+	logOutputLen(wlcIP)
+	addingLog(endMeasure,logActionStopMeasuring,wlcIP)
+	
+## savingLastClientRecord
+def savingLastClientRecord(collection,data_array,WLCIP):
+	global nameDBMongo
+	global mongoDBConnection
+	if ( len(data_array) > 0 ):
+		client = MongoClient(mongoDBConnection)
+		db = client[nameDBMongo]
+		db[collection].remove()
+		result = db[collection].insert(data_array)
+		message = "Store %d record in %s from %s" % ( len(result) , collection , WLCIP )
+		addingLog(datetime.datetime.now(),message,WLCIP)
+	else:
+		message = "Not enough elements for store in collection %s from %s " % (collection , WLCIP )
+	
+## Insert Data on MongoDB	
+def insertDataOnMongoDB(collection,data_array,WLCIP):
+	global nameDBMongo
+	global mongoDBConnection
+	if ( len(data_array) > 0 ):
+		client = MongoClient(mongoDBConnection)
+		db = client[nameDBMongo]
+		result = db[collection].insert(data_array)
+		message = "Store %d record in %s from %s" % ( len(result) , collection , WLCIP )
+		addingLog(datetime.datetime.now(),message,WLCIP)
+	else:
+		message = "Not enough elements for store in collection %s from %s " % (collection , WLCIP )
+	
+## Data of RogueAP
+def getRogueApInformation(wlcIP):
+	global path_bin,list_oid_rogue_ap,startMeasure
+	global output_snmp_rogueap_names,output_snmp_rogueap_macdet
+	global output_snmp_rogueap_lastreport
+	global rogueapCollection
+	## LOG
+	global logActionStartRogue,logActionStopRogue
+	
+	
+	addingLog(datetime.datetime.now(),logActionStartRogue,wlcIP)
+	
+	result1 = output_snmp_rogueap_names[1].split("\n")
+	result2 = output_snmp_rogueap_macdet[1].split("\n")
+	result3 = output_snmp_rogueap_lastreport[1].split("\n")
+	
+	result_extra = result2 + result3
+	
+	rogue_data = []
+	rogueApNames = []
+	
+	if "Timeout" in output_snmp_rogueap_names[1]:
+		syslog.syslog(syslog.LOG_INFO,output_snmp_clients_ip[1])
+		addingLog(datetime.datetime.now(),logActionStopRogue,wlcIP)
+		return 0
+	
+	
+	
+	for d in result1:
+		if len(d.split(" ")) == 4:
+			ROGUENAME = d.split(" ")[3].replace("\"","")
+			######## DON'T SAVE AL ROGUE DETECTIONS - DUPLICATE KEY
+			if ROGUENAME not in rogueApNames:
+				rogueApNames.append(ROGUENAME)
+				IDROGUE = d.split(" ")[0].replace(list_oid_rogue_ap["AP_ROGUE_NAMES"],"")
+				rogue = {}
+				for d1 in result_extra:
+					if IDROGUE in d1:
+						rogue['rogueap_name'] = ROGUENAME
+						rogue['wlc_ip'] = wlcIP
+						rogue['date_of_record'] = startMeasure
+						if list_oid_rogue_ap["AP_ROGUE_MAC_AP_DET"] in d1.split(" ")[0]:
+							rogue['ap_macradiodet'] = changeMacFormat(d1.split("Hex-STRING:")[1])
+						if list_oid_rogue_ap["AP_ROGUE_LASTREPORT"] in d1.split(" ")[0]:
+							rogue['rogueap_lastreport'] = changeMacFormat(d1.split("STRING:")[1])
+				if len(rogue) <> 0:
+					rogue_data.append(rogue)
+					
+	insertDataOnMongoDB(rogueapCollection,rogue_data,wlcIP)
+	addingLog(datetime.datetime.now(),logActionStopRogue,wlcIP)
+
+## Data of Clients		
+def getClientInformation(wlcIP,wlc):
+	global clientsCount,clientsLast
+	global path_bin,list_oid_client,startMeasure
+	global output_snmp_clients_ip,output_snmp_clients_mac,output_snmp_clients_macap
+	global clientsCollection,clientsLastCollection
+	## LOG
+	global logActionStartClients,logActionStopClients
+	addingLog(datetime.datetime.now(),logActionStartClients,wlcIP)
+	
+	result1 = output_snmp_clients_ip[1].split("\n")
+	result2 = output_snmp_clients_mac[1].split("\n")
+	result3 = output_snmp_clients_macap[1].split("\n")
+	
+	result_extra = result2 + result3
+	IDCLIENT = ""
+	IPCLIENT = ""
+
+	client_data = []
+	aps = {}
+	
+	if "Timeout" in output_snmp_ap_names[1]:
+		syslog.syslog(syslog.LOG_INFO,output_snmp_clients_ip[1])
+		addingLog(datetime.datetime.now(),logActionStopClients,wlcIP)
+		return 0
+	
+	if "OID" not in output_snmp_clients_ip[1]:
+		for d in result1:
+			IPCLIENT = d.split(" ")[3]
+			IDCLIENT = d.split(" ")[0].replace(list_oid_client["CLIENT_IP"],"")
+			client = {}
+			if "0.0.0.0" not in IPCLIENT:
+				for d1 in result_extra:
+					if IDCLIENT in d1:
+						client['client_ip'] = IPCLIENT
+						client['wlc_ip'] = wlcIP
+						client['date_of_record'] = startMeasure
+						if list_oid_client["CLIENT_MAC"] in d1.split(" ")[0]:
+							client['client_mac'] = changeMacFormat(d1.split("STRING:")[1])
+						if list_oid_client["CLIENT_MACAP"] in d1.split(" ")[0]:
+							client['ap_macradio'] = changeMacFormat(d1.split("Hex-STRING:")[1])
+							if client['ap_macradio'] in aps.keys():
+								aps[client['ap_macradio']] += 1
+							else:
+								aps[client['ap_macradio']] = 1
+							
+			if len(client) <> 0:
+				client_data.append(client)
+	else:
+		syslog.syslog(syslog.LOG_INFO,output_snmp_clients_ip[1])
+	
+	insertDataOnMongoDB(clientsCollection,client_data,wlcIP)
+	### Saving all Clients in one Array
+	clientsLast = clientsLast + client_data
+	#updateRRDFile(wlc,len(client_data))
+	addingClientSummary(wlc,wlcIP,len(client_data))
+	addingApCountSummary(wlc,wlcIP,aps)
+	addingLog(datetime.datetime.now(),logActionStopClients,wlcIP)
+
+##
+def addingApCountSummary(WLC,WLCIP,APS):
+	global apCount,startMeasure
+	for d in APS:
+		apDetail = {}
+		apDetail['date_of_record'] = startMeasure
+		apDetail['wlc_ip'] = WLCIP
+		apDetail['wlc_name'] = WLC
+		apDetail['ap_macradio'] = d
+		apDetail['ap_clientscount'] = APS[d]
+		apCount.append(apDetail)
+	
+##
+def addingClientSummary(WLC,WLCIP,CLIENTCOUNT):
+	global clientsCount,startMeasure
+	clientNumber = {}
+	clientNumber['date_of_record'] = startMeasure
+	clientNumber['wlc_ip'] = WLCIP
+	clientNumber['wlc_name'] = WLC
+	clientNumber['wlc_clientscount'] = CLIENTCOUNT
+	clientsCount.append(clientNumber)
+
+
+## Saving Summary
+def savingSummary():
+	global summaryCollection,startSummary
+	global nameDBMongo
+	global mongoDBConnection
+	summries = []
+	summary = {}
+	client = MongoClient(mongoDBConnection)
+	db = client[nameDBMongo]
+	result = db[summaryCollection].find().count()
+	summary['summary_start'] = startSummary
+	summary['summary_stop'] = datetime.datetime.now()
+	summary['summary_number'] = result + 1
+	summries.append(summary)
+	insertDataOnMongoDB(summaryCollection,summries,"savingSummary")
+
+## Saving Client Summary
+def savingClientSummary():
+	global clientsCount,wlcclientCollection
+	insertDataOnMongoDB(wlcclientCollection,clientsCount,"savingClientSummary")
+	
+## Saving Ap Summary
+def savingApSummary():
+	global apCount,apSummaryCollection
+	insertDataOnMongoDB(apSummaryCollection,apCount,"ApSummary")	
+		
+## Data of AP
+def getApInformation(wlcIP):
+	global startMeasure
+	global path_bin
+	global output_snmp_ap_names,output_snmp_ap_macap,output_snmp_ap_macet,output_snmp_ap_ip
+	global logActionStartAp,logActionStopAp
+	global apCollection
+	
+	addingLog(datetime.datetime.now(),logActionStartAp,wlcIP)
+	
+	result1 = output_snmp_ap_names[1].split("\n")
+	result2 = output_snmp_ap_macap[1].split("\n")
+	result3 = output_snmp_ap_macet[1].split("\n")
+	result4 = output_snmp_ap_ip[1].split("\n")
+	
+	result_extra = result2 + result3 + result4
+	ap_data = []
+		
+	if "Timeout" in output_snmp_ap_names[1]:
+		syslog.syslog(syslog.LOG_INFO,output_snmp_ap_names[1])
+		addingLog(datetime.datetime.now(),logActionStopAp,wlcIP)
+		return 0
+	
+	for result in result1:
+		ap = {}
+		data = result.split(" ")
+		IDAP = data[0].replace(list_oid_ap["AP_NAMES"],"")
+		ap['ap_name'] = data[3].replace("\"","")
+		ap['date_of_record'] = startMeasure
+		for d in result_extra:
+			if IDAP in d:
+				if list_oid_ap["AP_MACAP"]+"." in d.split(" ")[0]:
+					ap['ap_macradio'] = changeMacFormat(d.split("Hex-STRING:")[1])
+				if list_oid_ap["AP_MACETH"] in d.split(" ")[0]:
+					ap['ap_macethernet'] = changeMacFormat(d.split("Hex-STRING:")[1])
+				if list_oid_ap["AP_IP"] in d.split(" ")[0]:
+					ap['ap_ip'] = d.split("IpAddress: ")[1]
+				ap['wlc_ip'] = wlcIP
+		ap_data.append(ap)
+		
+	insertDataOnMongoDB(apCollection,ap_data,wlcIP)
+	addingLog(datetime.datetime.now(),logActionStopAp,wlcIP)
+
+## Change format of Mac, From SNMP format to HexaFormat
+def changeMacFormat(macaddress):
+	result = macaddress.replace(" ",":")
+	result = result.replace("\"","")
+	result = result.rstrip(":")
+	result = result.lstrip(":")
+	result = result.lower()	
+	return result
+	
+## Get information from config File
+def getConfiguration():
+	global ipMongoDB,nameDBMongo,portMongoDB
+	global userMongoDB,passwordMongoDB
+	global mongoDBConnection
+	global path_bin,path_rrddb,path_snmp_logs
+	global log_name
+	
+	config = ConfigParser.RawConfigParser()
+	config.read(path_config + 'mmwireless.cfg')
+	
+	## Log prefix
+	log_name = config.get('HEADERS', 'log_snmp')
+	
+	## Path for rrdbd, snmpscript and logs
+	path_bin = config.get('PATH', 'path_snmpscript')
+	path_rrddb = config.get('PATH', 'path_rrddb')
+	path_snmp_logs = config.get('PATH', 'path_snmp_logs')
+	
+	## Mongo Configuration parameters
+	ipMongoDB = config.get('MONGOCONF', 'ipdb')
+	nameDBMongo = config.get('MONGOCONF', 'db')
+	userMongoDB = config.get('MONGOCONF','user')
+	passwordMongoDB = config.get('MONGOCONF','password')
+	portMongoDB = config.get('MONGOCONF','port')
+	mongoDBConnection = 'mongodb://%s:%s@%s:%s/%s' % (userMongoDB,passwordMongoDB,ipMongoDB,portMongoDB,nameDBMongo)
+	syslog.syslog(syslog.LOG_INFO,mongoDBConnection)
+	
+	## Mongo collections = config.get('MONGOCOLLECTIONS',	
+	apCollection = config.get('MONGOCOLLECTIONS','ap')
+	apSummaryCollection = config.get('MONGOCOLLECTIONS','apsummary')
+	
+	clientsCollection = config.get('MONGOCOLLECTIONS','clients')
+	clientsLastCollection = config.get('MONGOCOLLECTIONS','clientslast')
+	
+	rogueapCollection = config.get('MONGOCOLLECTIONS','rogueap')
+	summaryCollection = config.get('MONGOCOLLECTIONS','summary')
+	wlcclientCollection = config.get('MONGOCOLLECTIONS','wlcclients')
+	
+	logCollection = config.get('MONGOCOLLECTIONS','log')
+	####################################################################
+	
+## Saving all information from summaries
+def savingSummaries():
+	global clientsLast
+	savingLogs()
+	savingClientSummary()
+	savingApSummary()
+	savingSummary()
+	savingLastClientRecord(clientsLastCollection,clientsLast," SUMMARY LAST CLIENTS")
+	
+	
+## 
+def main():
+	global list_wlc,list_oid_ap,list_oid_client
+	servicio = True	
+	#servicio = False
+	timePre = 0
+	getConfiguration()
+		
+	while servicio == True:
+		timeNow = datetime.datetime.now()
+		minutes = timeNow.minute
+		if timePre <> timeNow.minute:
+			if minutes == 0 or minutes % 5 == 0:
+				syslog.syslog(syslog.LOG_INFO,"------------ INIT mmwireless -------------- ")
+				setDatetimeMeasure()
+				clearingAllList()
+				timePre = timeNow.minute
+				for wlc in list_wlc:
+					syslog.syslog(syslog.LOG_INFO,"Start for: %s " % (wlc))
+					getInformationBySNMP(list_wlc[wlc])
+					getApInformation(list_wlc[wlc])
+					getClientInformation(list_wlc[wlc],wlc)
+					getRogueApInformation(list_wlc[wlc])
+					syslog.syslog(syslog.LOG_INFO,"End for: %s " % (wlc))
+				
+				savingSummaries()
+				output = commands.getstatusoutput("bash /home/plataforma/mmimages.sh")
+				syslog.syslog(syslog.LOG_INFO,"------------ FINISH mmwireless -------------- ")
+		time.sleep(1)
+
+	
+if __name__ == "__main__":	
+	main()
+
