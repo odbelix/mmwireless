@@ -26,6 +26,7 @@ import commands
 from rrdtool import update as rrd_update 
 import datetime
 from pymongo import MongoClient
+from pymongo import errors
 import ConfigParser
 from time import gmtime, strftime
 ########################################################################
@@ -220,28 +221,34 @@ def getInformationBySNMP(wlcIP):
 	
 ## savingLastClientRecord
 def savingLastClientRecord(collection,data_array,WLCIP):
-	global nameDBMongo
+	global nameDBMongo,ipMongoDB
 	global mongoDBConnection
 	if ( len(data_array) > 0 ):
-		client = MongoClient(mongoDBConnection)
-		db = client[nameDBMongo]
-		db[collection].remove()
-		result = db[collection].insert(data_array)
-		message = "Store %d record in %s from %s" % ( len(result) , collection , WLCIP )
-		addingLog(datetime.datetime.now(),message,WLCIP)
+		try:
+			client = MongoClient(mongoDBConnection)
+			db = client[nameDBMongo]
+			db[collection].remove()
+			result = db[collection].insert(data_array)
+			message = "Store %d record in %s from %s" % ( len(result) , collection , WLCIP )
+			addingLog(datetime.datetime.now(),message,WLCIP)
+		except errors.ConnectionFailure, e:
+			syslog.syslog(syslog.LOG_INFO,"ERROR: Could not connect to server: %s [%s]" % (e,ipMongoDB) )
 	else:
 		message = "Not enough elements for store in collection %s from %s " % (collection , WLCIP )
 	
 ## Insert Data on MongoDB	
 def insertDataOnMongoDB(collection,data_array,WLCIP):
-	global nameDBMongo
+	global nameDBMongo,ipMongoDB
 	global mongoDBConnection
 	if ( len(data_array) > 0 ):
-		client = MongoClient(mongoDBConnection)
-		db = client[nameDBMongo]
-		result = db[collection].insert(data_array)
-		message = "Store %d record in %s from %s" % ( len(result) , collection , WLCIP )
-		addingLog(datetime.datetime.now(),message,WLCIP)
+		try:
+			client = MongoClient(mongoDBConnection)
+			db = client[nameDBMongo]
+			result = db[collection].insert(data_array)
+			message = "Store %d record in %s from %s" % ( len(result) , collection , WLCIP )
+			addingLog(datetime.datetime.now(),message,WLCIP)
+		except errors.ConnectionFailure, e:
+			syslog.syslog(syslog.LOG_INFO,"ERROR: Could not connect to server: %s [%s]" % (e,ipMongoDB) )
 	else:
 		message = "Not enough elements for store in collection %s from %s " % (collection , WLCIP )
 	
@@ -381,19 +388,22 @@ def addingClientSummary(WLC,WLCIP,CLIENTCOUNT):
 ## Saving Summary
 def savingSummary():
 	global summaryCollection,startSummary
-	global nameDBMongo
+	global nameDBMongo,ipMongoDB
 	global mongoDBConnection
 	summries = []
 	summary = {}
-	client = MongoClient(mongoDBConnection)
-	db = client[nameDBMongo]
-	result = db[summaryCollection].find().count()
-	summary['summary_start'] = startSummary
-	summary['summary_stop'] = datetime.datetime.now()
-	summary['summary_number'] = result + 1
-	summries.append(summary)
-	insertDataOnMongoDB(summaryCollection,summries,"savingSummary")
-
+	try:
+		client = MongoClient(mongoDBConnection)
+		db = client[nameDBMongo]
+		result = db[summaryCollection].find().count()
+		summary['summary_start'] = startSummary
+		summary['summary_stop'] = datetime.datetime.now()
+		summary['summary_number'] = result + 1
+		summries.append(summary)
+		insertDataOnMongoDB(summaryCollection,summries,"savingSummary")
+	except errors.ConnectionFailure, e:
+			syslog.syslog(syslog.LOG_INFO,"ERROR: Could not connect to server: %s [%s]" % (e,ipMongoDB) )
+	
 ## Saving Client Summary
 def savingClientSummary():
 	global clientsCount,wlcclientCollection
