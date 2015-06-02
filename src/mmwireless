@@ -29,8 +29,8 @@ from pymongo import MongoClient
 import ConfigParser
 from time import gmtime, strftime
 ########################################################################
-
-
+### This line must changes with the PATH where the configuration file 
+### is located
 path_config = "/home/mmoscoso/Documentos/workspace/mmwireless/etc/"
 ########################################################################
 # WLC and SNMP OID declaration
@@ -500,19 +500,18 @@ def getConfiguration():
 	
 ## Saving all information from summaries
 def savingSummaries():
-	global clientsLast
+	global clientsLast,clientsLastCollection
 	savingLogs()
 	savingClientSummary()
 	savingApSummary()
 	savingSummary()
-	savingLastClientRecord(clientsLastCollection,clientsLast," SUMMARY LAST CLIENTS")
+	savingLastClientRecord(clientsLastCollection,clientsLast,"Clientslast-Array")
 	
 	
 ## 
 def main():
 	global list_wlc,list_oid_ap,list_oid_client
 	servicio = True	
-	#servicio = False
 	timePre = 0
 	getConfiguration()
 		
@@ -537,7 +536,6 @@ def main():
 				output = commands.getstatusoutput("bash /home/plataforma/mmimages.sh")
 				syslog.syslog(syslog.LOG_INFO,"------------ FINISH mmwireless -------------- ")
 		time.sleep(1)
-
 	
 if __name__ == "__main__":	
 	main()
