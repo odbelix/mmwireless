@@ -1,0 +1,160 @@
+#!/usr/bin/env python
+########################################################################
+# <mmimages.sh, Script for create images for mmwireless project
+# Copyright (C) 2014  Manuel Moscoso Dominguez manuel.moscoso.d@gmail.com
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software Foundation,
+# Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+########################################################################
+import os
+import rrdtool
+import ConfigParser
+import argparse
+import syslog
+
+## VARIABLE DEFINITION
+path_config = "/home/mmoscoso/Documentos/workspace/mmwireless/etc/"
+path_rrddb = ""
+hours = ""
+dbs = []
+path_img = ""
+move_img = True
+
+Config = ConfigParser.ConfigParser()
+
+
+#Check if file exists
+def checkFile(filename):
+	if os.path.exists(filename) == False :
+		return False
+	else:
+		if os.path.isdir(filename) == True:
+			return False
+		else:
+			return True
+
+
+def getConfigurationInformation():
+	global dbs
+	global path_rrddb
+	global hours,path_img,move_img
+	config = ConfigParser.RawConfigParser()
+	config.read(path_config + 'mmwireless.cfg')
+	
+	dbs.append(config.get('RRDTOOLDATABASES', 'db_talca'))
+	dbs.append(config.get('RRDTOOLDATABASES', 'db_curico'))
+	dbs.append(config.get('RRDTOOLDATABASES', 'db_quebec'))
+	dbs.append(config.get('RRDTOOLDATABASES', 'db_santaelena'))
+	dbs.append(config.get('RRDTOOLDATABASES', 'db_test'))
+	
+	path_rrddb = config.get('PATH', 'path_rrddb')
+	hours = config.get('TIMEIMAGES','hours')
+	path_img = config.get('TIMEIMAGES','path_img')
+	move_img =config.getboolean('TIMEIMAGES','move_img')
+	
+
+def createRRDDataBase(nameDB):
+	global path_rrddb
+	path = path_rrddb + "/" + nameDB
+	if checkFile(path):
+		syslog.syslog(syslog.LOG_INFO,"Data base (%s) exists" % (path))
+	else:
+		#Creating dataabase
+		rrdtool.create(path,"--step","300","--start","1023654125",
+							"DS:CLIENT:GAUGE:360:0:671744",
+							"RRA:AVERAGE:0.5:1:720",
+							"RRA:MIN:0.5:1:720",
+							"RRA:MAX:0.5:1:720",
+							"RRA:LAST:0.5:1:720")
+		syslog.syslog(syslog.LOG_INFO,"created database (%s)" % (path))
+
+def getNameOfDb(nameDB):
+	result = nameDB.replace("wlc","")
+	result = result.replace(".rrd","")
+	result = result.replace("clients","")
+	result = result.replace("_","")
+	return result.upper()
+	
+							
+						
+def generateImages(nameDB):
+	global path_rrddb
+	global hours
+	path = path_rrddb + "/" + nameDB
+	
+	hour_list = hours.split(",")
+	minutes_per_hour = 3600
+	
+	nametitle = getNameOfDb(nameDB)
+	for hour in hour_list:
+		syslog.syslog(syslog.LOG_INFO,"Creating images of past %s hour for database(%s)" % (hour,path))
+		start = int(hour) * minutes_per_hour
+		nameimg = "%s-%s.png" % (path.replace(".rrd",""),hour)
+		ret = rrdtool.graph("%s" % nameimg,"--start","-%ss" % start,"-w 680","-h 200","--vertical-label=Numero Clientes",
+						'--imgformat', 'PNG',
+						"--title","Clientes %s - (Pasadas %s hora(s))" %(nametitle,hour),
+						"--font","TITLE:16:Arial",
+						"--zoom","2",
+						"--units-exponent","2",
+						"DEF:maxclient=%s:CLIENT:MAX" %(path),
+						"DEF:lastclient=%s:CLIENT:LAST" %(path),
+						"DEF:minclient=%s:CLIENT:MIN" %(path),
+						"DEF:clients=%s:CLIENT:AVERAGE" %(path),
+						"VDEF:max=maxclient,MAXIMUM",
+						"VDEF:min=minclient,MINIMUM",
+						"VDEF:last=lastclient,LAST",
+						"AREA:clients#2196f3:Numero de Clientes conectados",
+						"COMMENT:\\n",
+						"VRULE:last#4caf50:Ultima medicion:",
+						"COMMENT:\\n",
+						"HRULE:min#e1bee7:Min numero de clientes",
+						"COMMENT:\\n",
+						"HRULE:max#e57373:Max numero de clientes")
+		
+		
+							
+# Create Argument Parser
+parser = argparse.ArgumentParser(
+formatter_class=argparse.RawDescriptionHelpFormatter,
+description="mmimages - You can create RRD databases and generate images from this files",
+epilog="\n")
+	
+#Set arguments
+parser.add_argument("-c", help="Create rrdtools dbs",action="store_true")
+parser.add_argument("-I", help="Create images png",action="store_true")
+
+#Parse argv to args 
+args = parser.parse_args()
+
+if args.c:
+	syslog.syslog(syslog.LOG_INFO,"Creating RRD databases")
+	getConfigurationInformation()
+	for db in dbs:
+		createRRDDataBase(db)
+	
+elif args.I:
+	syslog.syslog(syslog.LOG_INFO,"Creating RRD databases")
+	getConfigurationInformation()
+	for db in dbs:
+		generateImages(db)
+	if move_img == True:
+		syslog.syslog(syslog.LOG_INFO,"Moving the images to PATH: %s" % (path_img) )
+		path = path_rrddb + "/*.png"
+		os.system("mv %s %s" % (path,path_img))
+		os.system("chown www-data.www-data  %s*.png" % (path_img))
+	else:
+		syslog.syslog(syslog.LOG_INFO,"Moving configuration is not enabled")
+		
+else:
+	parser.print_help()
