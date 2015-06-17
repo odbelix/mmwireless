@@ -1,1 +1,12 @@
-README
+Author: Manuel Alejandro Moscoso Dominguez
+email: manuel.moscoso.d@gmail.com
+------------------------------------------------------------------------
+mmwireless is a group of script that can get informations from Wireless 
+Lan Controllers (Cisco - WLC) and store this information in two 
+databases; rrd and mongodb.
+
+These scripts don't management the mongodb, only stores the information 
+in one instance that you must define in the configuration files.
+
+You must use the INSTALL.sh script for install, remove and check the 
+installation process
