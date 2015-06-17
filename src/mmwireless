@@ -32,8 +32,8 @@ from time import gmtime, strftime
 ########################################################################
 ### This line must changes with the PATH where the configuration file 
 ### is located
-path_config = "/home/mmoscoso/Documentos/workspace/mmwireless/etc/"
-#path_config = "/home/plataforma/smartwifi/etc/"
+#path_config = "/home/mmoscoso/Documentos/workspace/mmwireless/etc/"
+path_config = "/home/plataforma/smartwifi/etc/"
 ########################################################################
 # WLC and SNMP OID declaration
 list_wlc = {'wlc_clients_talca':'192.168.20.135','wlc_clients_curico' : '172.17.1.250','wlc_clients_santaelena' : '172.18.1.250', 'wlc_clients_quebec' : '10.1.1.120'}
@@ -503,7 +503,18 @@ def changeMacFormat(macaddress):
 	result = result.lstrip(":")
 	result = result.lower()	
 	return result
-	
+
+
+def checkFileExits(configfile):
+	if os.path.exists(configfile) == False :
+		return False
+	else:
+		if os.path.isdir(configfile) == True:
+			return False
+		else:
+			return True
+			
+
 ## Get information from config File
 def getConfiguration():
 	global ipMongoDB,nameDBMongo,portMongoDB
@@ -513,7 +524,13 @@ def getConfiguration():
 	global log_name
 	
 	config = ConfigParser.RawConfigParser()
-	config.read(path_config + 'mmwireless.cfg')
+	path = path_config + 'mmwireless.cfg'
+	if checkFileExits(path) == False:
+		syslog.syslog(syslog.LOG_INFO,"Configuration file does not exists")
+		sys.exit("Configuration file does not exists (%s)" % (path))
+		sys.exit(0)
+	
+	config.read(path)
 	
 	## Log prefix
 	log_name = config.get('HEADERS', 'log_snmp')
@@ -581,7 +598,7 @@ def main():
 					syslog.syslog(syslog.LOG_INFO,"End for: %s " % (wlc))
 				
 				savingSummaries()
-				output = commands.getstatusoutput("bash /home/plataforma/mmimages.sh")
+				output = commands.getstatusoutput("mmimages -I")
 				syslog.syslog(syslog.LOG_INFO,"------------ FINISH mmwireless -------------- ")
 		time.sleep(1)
 	

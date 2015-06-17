@@ -114,13 +114,17 @@ def generateImages(nameDB):
 						"VDEF:max=maxclient,MAXIMUM",
 						"VDEF:min=minclient,MINIMUM",
 						"VDEF:last=lastclient,LAST",
-						"AREA:clients#2196f3:Numero de Clientes conectados",
+						"AREA:clients#2196f3:Numero de Clientes conectados:",
 						"COMMENT:\\n",
-						"VRULE:last#4caf50:Ultima medicion:",
+						"VRULE:last#4caf50:Ultima medicion\:",
+						"GPRINT:last:%0.0lf clientes",
 						"COMMENT:\\n",
-						"HRULE:min#e1bee7:Min numero de clientes",
+						"HRULE:min#e1bee7:Min numero de clientes\:",
+						"GPRINT:min:%0.0lf clientes",
 						"COMMENT:\\n",
-						"HRULE:max#e57373:Max numero de clientes")
+						"HRULE:max#e57373:Max numero de clientes\:",
+						"GPRINT:max:%2.0lf clientes",
+						"COMMENT:\\n")
 		
 		
 							
