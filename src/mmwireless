@@ -32,8 +32,7 @@ from time import gmtime, strftime
 ########################################################################
 ### This line must changes with the PATH where the configuration file 
 ### is located
-#path_config = "/home/mmoscoso/Documentos/workspace/mmwireless/etc/"
-path_config = "/home/plataforma/smartwifi/etc/"
+path_config = "/etc/mmwireless/"
 ########################################################################
 # WLC and SNMP OID declaration
 list_wlc = {'wlc_clients_talca':'192.168.20.135','wlc_clients_curico' : '172.17.1.250','wlc_clients_santaelena' : '172.18.1.250', 'wlc_clients_quebec' : '10.1.1.120'}
@@ -45,6 +44,7 @@ list_oid_rogue_ap = { 'AP_ROGUE_NAMES' : 'iso.3.6.1.4.1.14179.2.1.7.1.11' , 'AP_
 path_bin = ""
 path_rrddb = ""
 path_snmp_logs = ""
+path_imagescript = ""
 log_name = ""
 ########################################################################
 # Collections 
@@ -521,6 +521,7 @@ def getConfiguration():
 	global userMongoDB,passwordMongoDB
 	global mongoDBConnection
 	global path_bin,path_rrddb,path_snmp_logs
+	global path_imagescript
 	global log_name
 	
 	config = ConfigParser.RawConfigParser()
@@ -539,6 +540,8 @@ def getConfiguration():
 	path_bin = config.get('PATH', 'path_snmpscript')
 	path_rrddb = config.get('PATH', 'path_rrddb')
 	path_snmp_logs = config.get('PATH', 'path_snmp_logs')
+	path_imagescript = config.get('PATH', 'path_imagescript')
+	syslog.syslog(syslog.LOG_INFO,"path_imagescript = %s" % (path_imagescript))
 	
 	## Mongo Configuration parameters
 	ipMongoDB = config.get('MONGOCONF', 'ipdb')
@@ -576,6 +579,7 @@ def savingSummaries():
 ## 
 def main():
 	global list_wlc,list_oid_ap,list_oid_client
+	global path_imagescript
 	servicio = True	
 	timePre = 0
 	getConfiguration()
@@ -598,7 +602,8 @@ def main():
 					syslog.syslog(syslog.LOG_INFO,"End for: %s " % (wlc))
 				
 				savingSummaries()
-				output = commands.getstatusoutput("mmimages -I")
+				syslog.syslog(syslog.LOG_INFO,"Executing %s -I" % (path_imagescript))
+				output = commands.getstatusoutput(path_imagescript + " -I")
 				syslog.syslog(syslog.LOG_INFO,"------------ FINISH mmwireless -------------- ")
 		time.sleep(1)
 	

@@ -24,7 +24,7 @@ import argparse
 import syslog
 
 ## VARIABLE DEFINITION
-path_config = "/home/mmoscoso/Documentos/workspace/mmwireless/etc/"
+path_config = "/etc/mmwireless/mmwireless.cfg"
 path_rrddb = ""
 hours = ""
 dbs = []
@@ -50,14 +50,11 @@ def getConfigurationInformation():
 	global path_rrddb
 	global hours,path_img,move_img
 	config = ConfigParser.RawConfigParser()
-	config.read(path_config + 'mmwireless.cfg')
-	
-	dbs.append(config.get('RRDTOOLDATABASES', 'db_talca'))
-	dbs.append(config.get('RRDTOOLDATABASES', 'db_curico'))
-	dbs.append(config.get('RRDTOOLDATABASES', 'db_quebec'))
-	dbs.append(config.get('RRDTOOLDATABASES', 'db_santaelena'))
-	dbs.append(config.get('RRDTOOLDATABASES', 'db_test'))
-	
+	config.read(path_config)
+	options = config.options("RRDTOOLDATABASES")
+	for option in options:
+		dbs.append(config.get('RRDTOOLDATABASES', option))
+		
 	path_rrddb = config.get('PATH', 'path_rrddb')
 	hours = config.get('TIMEIMAGES','hours')
 	path_img = config.get('TIMEIMAGES','path_img')
@@ -148,7 +145,7 @@ if args.c:
 		createRRDDataBase(db)
 	
 elif args.I:
-	syslog.syslog(syslog.LOG_INFO,"Creating RRD databases")
+	syslog.syslog(syslog.LOG_INFO,"Generating images from RRD databases")
 	getConfigurationInformation()
 	for db in dbs:
 		generateImages(db)
