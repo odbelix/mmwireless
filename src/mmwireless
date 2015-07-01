@@ -298,27 +298,29 @@ def getRogueApInformation(wlcIP):
 		return 0
 	
 	
-	
-	for d in result1:
-		if len(d.split(" ")) == 4:
-			ROGUENAME = d.split(" ")[3].replace("\"","")
-			######## DON'T SAVE AL ROGUE DETECTIONS - DUPLICATE KEY
-			if ROGUENAME not in rogueApNames:
-				rogueApNames.append(ROGUENAME)
-				IDROGUE = d.split(" ")[0].replace(list_oid_rogue_ap["AP_ROGUE_NAMES"],"")
-				rogue = {}
-				for d1 in result_extra:
-					if IDROGUE in d1:
-						rogue['rogueap_name'] = ROGUENAME
-						rogue['wlc_ip'] = wlcIP
-						rogue['date_of_record'] = startMeasure
-						if list_oid_rogue_ap["AP_ROGUE_MAC_AP_DET"] in d1.split(" ")[0]:
-							rogue['ap_macradiodet'] = changeMacFormat(d1.split("Hex-STRING:")[1])
-						if list_oid_rogue_ap["AP_ROGUE_LASTREPORT"] in d1.split(" ")[0]:
-							rogue['rogueap_lastreport'] = changeMacFormat(d1.split("STRING:")[1])
-				if len(rogue) <> 0:
-					rogue_data.append(rogue)
-					
+	if "OID" not in output_snmp_rogueap_names[1]:
+		for d in result1:
+			if len(d.split(" ")) == 4:
+				ROGUENAME = d.split(" ")[3].replace("\"","")
+				######## DON'T SAVE AL ROGUE DETECTIONS - DUPLICATE KEY
+				if ROGUENAME not in rogueApNames:
+					rogueApNames.append(ROGUENAME)
+					IDROGUE = d.split(" ")[0].replace(list_oid_rogue_ap["AP_ROGUE_NAMES"],"")
+					rogue = {}
+					for d1 in result_extra:
+						if IDROGUE in d1:
+							rogue['rogueap_name'] = ROGUENAME
+							rogue['wlc_ip'] = wlcIP
+							rogue['date_of_record'] = startMeasure
+							if list_oid_rogue_ap["AP_ROGUE_MAC_AP_DET"] in d1.split(" ")[0]:
+								rogue['ap_macradiodet'] = changeMacFormat(d1.split("Hex-STRING:")[1])
+							if list_oid_rogue_ap["AP_ROGUE_LASTREPORT"] in d1.split(" ")[0]:
+								rogue['rogueap_lastreport'] = changeMacFormat(d1.split("STRING:")[1])
+					if len(rogue) <> 0:
+						rogue_data.append(rogue)
+	else:
+		syslog.syslog(syslog.LOG_INFO,output_snmp_rogueap_names[1])
+		
 	insertDataOnMongoDB(rogueapCollection,rogue_data,wlcIP)
 	addingLog(datetime.datetime.now(),logActionStopRogue,wlcIP)
 
@@ -427,7 +429,7 @@ def savingSummary():
 def savingClientSummary():
 	global clientsCount,wlcclientCollection
 	insertDataOnMongoDB(wlcclientCollection,clientsCount,"savingClientSummary")
-	
+
 ## Saving Ap Summary
 def savingApSummary():
 	global apCount,apSummaryCollection
@@ -462,38 +464,58 @@ def getApInformation(wlcIP):
 		addingLog(datetime.datetime.now(),logActionStopAp,wlcIP)
 		return 0
 	
-	for result in result1:
-		ap = {}
-		data = result.split(" ")
-		IDAP = data[0].replace(list_oid_ap["AP_NAMES"],"")
-		ap['ap_name'] = data[3].replace("\"","")
-		ap['date_of_record'] = startMeasure
-		for d in result_extra:
-			if IDAP in d:
-				if list_oid_ap["AP_MACAP"]+"." in d.split(" ")[0]:
-					ap['ap_macradio'] = changeMacFormat(d.split("Hex-STRING:")[1])
-				if list_oid_ap["AP_MACETH"] in d.split(" ")[0]:
-					ap['ap_macethernet'] = changeMacFormat(d.split("Hex-STRING:")[1])
-				if list_oid_ap["AP_IP"] in d.split(" ")[0]:
-					ap['ap_ip'] = d.split("IpAddress: ")[1]
-				if list_oid_ap["AP_MODEL"]+"." in d.split(" ")[0]:
-					ap['ap_model'] = getCleanStringText(d.split("STRING:")[1])
-				if list_oid_ap["AP_SERIAL"]+"." in d.split(" ")[0]:
-					ap['ap_serial'] = getCleanStringText(d.split("STRING:")[1])
-				if list_oid_ap["AP_IOSVERSION"]+"." in d.split(" ")[0]:
-					ap['ap_iosversion'] = getCleanStringText(d.split("STRING:")[1])
-					
-				ap['wlc_ip'] = wlcIP
-		ap_data.append(ap)
+	if "OID" not in output_snmp_ap_names[1]:
+		for result in result1:
+			ap = {}
+			data = result.split(" ")
+			IDAP = data[0].replace(list_oid_ap["AP_NAMES"],"")
+			ap['ap_name'] = data[3].replace("\"","")
+			ap['date_of_record'] = startMeasure
+			for d in result_extra:
+				if IDAP in d:
+					if list_oid_ap["AP_MACAP"]+"." in d.split(" ")[0]:
+						ap['ap_macradio'] = changeMacFormat(d.split("Hex-STRING:")[1])
+					if list_oid_ap["AP_MACETH"] in d.split(" ")[0]:
+						ap['ap_macethernet'] = changeMacFormat(d.split("Hex-STRING:")[1])
+					if list_oid_ap["AP_IP"] in d.split(" ")[0]:
+						ap['ap_ip'] = d.split("IpAddress: ")[1]
+					if list_oid_ap["AP_MODEL"]+"." in d.split(" ")[0]:
+						print len(d.split("STRING:"))
+						if len(d.split("STRING:")) == 2:
+							ap['ap_model'] = getCleanStringText(d.split("STRING:")[1])
+						else:
+							ap['ap_iosversion'] = "No data"
+					if list_oid_ap["AP_SERIAL"]+"." in d.split(" ")[0]:
+						print len(d.split("STRING:"))
+						if len(d.split("STRING:")) == 2:
+							ap['ap_serial'] = getCleanStringText(d.split("STRING:")[1])
+						else: 
+							ap['ap_iosversion'] = "No data"
+					if list_oid_ap["AP_IOSVERSION"]+"." in d.split(" ")[0]:
+						print len(d.split("STRING:"))
+						if len(d.split("STRING:")) == 2:
+							ap['ap_iosversion'] = getCleanStringText(d.split("STRING:")[1])
+						else:
+							ap['ap_iosversion'] = "No data"
+
+					ap['wlc_ip'] = wlcIP
+			ap_data.append(ap)
+	else:
+		syslog.syslog(syslog.LOG_INFO,output_snmp_ap_names[1])	
+		
 		
 	insertDataOnMongoDB(apCollection,ap_data,wlcIP)
 	addingLog(datetime.datetime.now(),logActionStopAp,wlcIP)
 
 def getCleanStringText(text):
-	result = text.replace("\"","")
-	result = result.replace(" ","")
-	result = result.replace("$","")
-	return result
+	if (len(text) > 3):
+		result = text.replace("\"","")
+		result = result.replace(" ","")
+		result = result.replace("$","")
+		return result
+	else:
+		result = "";
+		return result;
 
 ## Change format of Mac, From SNMP format to HexaFormat
 def changeMacFormat(macaddress):
@@ -550,6 +572,7 @@ def getConfiguration():
 	passwordMongoDB = config.get('MONGOCONF','password')
 	portMongoDB = config.get('MONGOCONF','port')
 	mongoDBConnection = 'mongodb://%s:%s@%s:%s/%s' % (userMongoDB,passwordMongoDB,ipMongoDB,portMongoDB,nameDBMongo)
+	mongoDBConnection = mongoDBConnection.rstrip()
 	syslog.syslog(syslog.LOG_INFO,mongoDBConnection)
 	
 	## Mongo collections = config.get('MONGOCOLLECTIONS',	
