@@ -29,6 +29,9 @@ from pymongo import MongoClient
 from pymongo import errors
 import ConfigParser
 from time import gmtime, strftime
+
+
+from multiprocessing.pool import ThreadPool as Pool
 ########################################################################
 ### This line must changes with the PATH where the configuration file 
 ### is located
@@ -147,7 +150,7 @@ def updateRRDFile(wlc,nClients):
 	value = 'N:%d' % (nClients)
 	ret = rrd_update( path_rrddb +'/%s.rrd' %(wlc),value);
 	if ret:
-		print rrdtool.error()
+		syslog.syslog(syslog.LOG_INFO,"Error whit rrd: %s" % rrdtool.error())
 	
 ##
 def logOutputLen(WLCIP):
@@ -480,19 +483,19 @@ def getApInformation(wlcIP):
 					if list_oid_ap["AP_IP"] in d.split(" ")[0]:
 						ap['ap_ip'] = d.split("IpAddress: ")[1]
 					if list_oid_ap["AP_MODEL"]+"." in d.split(" ")[0]:
-						print len(d.split("STRING:"))
+						
 						if len(d.split("STRING:")) == 2:
 							ap['ap_model'] = getCleanStringText(d.split("STRING:")[1])
 						else:
 							ap['ap_iosversion'] = "No data"
 					if list_oid_ap["AP_SERIAL"]+"." in d.split(" ")[0]:
-						print len(d.split("STRING:"))
+						
 						if len(d.split("STRING:")) == 2:
 							ap['ap_serial'] = getCleanStringText(d.split("STRING:")[1])
 						else: 
 							ap['ap_iosversion'] = "No data"
 					if list_oid_ap["AP_IOSVERSION"]+"." in d.split(" ")[0]:
-						print len(d.split("STRING:"))
+						
 						if len(d.split("STRING:")) == 2:
 							ap['ap_iosversion'] = getCleanStringText(d.split("STRING:")[1])
 						else:
@@ -599,6 +602,14 @@ def savingSummaries():
 	savingLastClientRecord(clientsLastCollection,clientsLast,"Clientslast-Array")
 	
 	
+def allRequestForOneWLC(wlc,ip):
+	syslog.syslog(syslog.LOG_INFO,"Start for: %s " % (wlc))
+	getInformationBySNMP(ip)
+	getApInformation(ip)
+	getClientInformation(ip,wlc)
+	getRogueApInformation(ip)
+	syslog.syslog(syslog.LOG_INFO,"End for: %s " % (wlc))
+	
 ## 
 def main():
 	global list_wlc,list_oid_ap,list_oid_client
@@ -606,6 +617,8 @@ def main():
 	servicio = True	
 	timePre = 0
 	getConfiguration()
+		
+	
 		
 	while servicio == True:
 		timeNow = datetime.datetime.now()
@@ -616,13 +629,22 @@ def main():
 				setDatetimeMeasure()
 				clearingAllList()
 				timePre = timeNow.minute
+				
+				pool_size = 4	
+				pool = Pool(pool_size)
+				
 				for wlc in list_wlc:
-					syslog.syslog(syslog.LOG_INFO,"Start for: %s " % (wlc))
-					getInformationBySNMP(list_wlc[wlc])
-					getApInformation(list_wlc[wlc])
-					getClientInformation(list_wlc[wlc],wlc)
-					getRogueApInformation(list_wlc[wlc])
-					syslog.syslog(syslog.LOG_INFO,"End for: %s " % (wlc))
+					pool.apply_async(allRequestForOneWLC,(wlc,list_wlc[wlc]))
+					#allRequestForOneWLC(wlc,list_wlc[wlc])
+					#syslog.syslog(syslog.LOG_INFO,"Start for: %s " % (wlc))
+					#getInformationBySNMP(list_wlc[wlc])
+					#getApInformation(list_wlc[wlc])
+					#getClientInformation(list_wlc[wlc],wlc)
+					#getRogueApInformation(list_wlc[wlc])
+					#syslog.syslog(syslog.LOG_INFO,"End for: %s " % (wlc))
+				
+				pool.close()
+				pool.join()
 				
 				savingSummaries()
 				syslog.syslog(syslog.LOG_INFO,"Executing %s -I" % (path_imagescript))
